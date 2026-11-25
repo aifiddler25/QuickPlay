@@ -1,4 +1,4 @@
-/* CleanTV QuickPlay 1.3.1. Standalone Lampa plugin; no background service. */
+/* CleanTV QuickPlay 1.4.0. Standalone Lampa plugin; no background service. */
 (function (root, factory) {
     var core = factory();
     if (typeof module === 'object' && module.exports) module.exports = core;
@@ -397,7 +397,7 @@
             L.SettingsApi.addParam({ component: 'cleantv_quickplay',
                 param: { name: 'cleantv_qp_quality', type: 'select', default: 'auto',
                     values: { 'auto': 'Авто — до 1080p', '480': '480p', '720': '720p', '1080': '1080p', '2160': '2160p (4K)' } },
-                field: { name: 'Качество видео', description: 'Точный выбор без перехода на более низкое качество. Неизвестное разрешение исключается.' } });
+                field: { name: 'Качество видео', description: 'Авто: сначала 1080p, затем 720p, 576p и 480p; внутри качества — больше сидов. Точный выбор не понижается.' } });
             L.SettingsApi.addParam({ component: 'cleantv_quickplay',
                 param: { name: 'cleantv_qp_min_seeds', type: 'select', default: '1',
                     values: { '1': '1', '3': '3', '5': '5', '10': '10', '20': '20', '50': '50', '100': '100' } },
@@ -408,9 +408,9 @@
         }
         L.Listener.follow('full', addButton);
         if (L.Timeline && L.Timeline.listener) L.Timeline.listener.follow('update', refreshResume);
-        log('ready', { version: '1.3.1', build: '20261116.3' });
+        log('ready', { version: '1.4.0', build: '20261126.1' });
     }
-    root.CleanTVQuickPlay = { version: '1.3.1', start: start, resume: resume, cancel: function () {
+    root.CleanTVQuickPlay = { version: '1.4.0', start: start, resume: resume, cancel: function () {
         if (episodeLoad) { episodeLoad.active = false; clearTimeout(episodeLoad.timer); episodeLoad = null; L.Modal.close(); restoreFocus(); }
         stop(current, true);
     } };
@@ -431,8 +431,7 @@
         if (/\b(?:4k|uhd)\b/i.test(text || '')) return 2160;
         return 0;
     }
-    function qualityMatches(title, path, quality, final, probe) {
-        if (badFormat(title) || badFormat(path)) return false;
+    function probeResolution(probe) {
         var video = Array.isArray(probe) ? probe.filter(function (s) { return s.codec_type === 'video'; })[0] : null;
         var c = 0;
         if (video && (Number(video.width) > 0 || Number(video.height) > 0)) {
@@ -441,7 +440,11 @@
                 width > 1920 || height > 1080 ? 1440 : width > 1280 || height > 720 ? 1080 :
                 width > 854 || height > 576 ? 720 : height > 480 ? 576 : 480;
         }
-        var a = resolution(title), b = resolution(path), size = c || b || a;
+        return c;
+    }
+    function qualityMatches(title, path, quality, final, probe) {
+        if (badFormat(title) || badFormat(path)) return false;
+        var c = probeResolution(probe), a = resolution(title), b = resolution(path), size = c || b || a;
         quality = String(quality || 'auto');
         if (quality === 'auto') return Math.max(a, b, c) <= 1080;
         if (!size) return !final;
@@ -462,7 +465,11 @@
         options = options || {};
         return results.filter(function (r) {
             return Number(r.Seeders) >= (options.minSeeds || 1) && (r.MagnetUri || r.Link) && titleMatches(r.Title, movie) && qualityMatches(r.Title, '', options.quality, false, r.ffprobe);
-        }).slice().sort(function (a, b) { return Number(b.Seeders) - Number(a.Seeders) || Number(a.Size || 0) - Number(b.Size || 0); });
+        }).slice().sort(function (a, b) {
+            var qualityOrder = String(options.quality || 'auto') === 'auto' ?
+                (probeResolution(b.ffprobe) || resolution(b.Title)) - (probeResolution(a.ffprobe) || resolution(a.Title)) : 0;
+            return qualityOrder || Number(b.Seeders) - Number(a.Seeders) || Number(a.Size || 0) - Number(b.Size || 0);
+        });
     }
     function isVideo(file) {
         return /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts)$/i.test(file.path || '') &&
